@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GNSS 模块测试</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">🛰</span> GNSS 模块测试 <small id="moduleName"></small></div>
+  <div class="hstat">
+    <span class="pill" id="pillPort">串口 --</span>
+    <span class="pill" id="pillRate">-- 行/s</span>
+    <span class="pill" id="pillEngine">引擎 --</span>
+    <span class="pill" id="pillFix">无定位</span>
+    <span class="pill" id="pillRec" hidden>● 录制中</span>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="live">实时监测</button>
+  <button class="tab" data-tab="test">自动测试</button>
+  <button class="tab" data-tab="console">NMEA / AT</button>
+  <button class="tab" data-tab="config">配置</button>
+</nav>
+
+<main>
+<!-- ============================== LIVE ============================== -->
+<section id="tab-live" class="tabpane active">
+  <div class="cards">
+    <div class="card"><div class="k">定位状态</div><div class="v" id="vFix">--</div><div class="s" id="vQual">--</div></div>
+    <div class="card"><div class="k">实时经纬度 (原始)</div><div class="v sm" id="vLatLon">--</div><div class="s"><a id="mapLink" target="_blank" href="#">在地图中查看</a></div></div>
+    <div class="card"><div class="k">Survey-In 收敛坐标 <small id="vSvN"></small></div><div class="v sm" id="vSvLatLon">--</div><div class="s" id="vSvStd">等待静态收敛...</div></div>
+    <div class="card"><div class="k">海拔 (实时 / 收敛)</div><div class="v" id="vAlt">--</div><div class="s" id="vGeoid">--</div></div>
+    <div class="card"><div class="k">卫星 使用 / 可见</div><div class="v" id="vSats">--</div><div class="s" id="vPerSys">--</div></div>
+    <div class="card"><div class="k">C/N0 Top4 / 最大</div><div class="v" id="vSnr">--</div><div class="s">dB-Hz</div></div>
+    <div class="card"><div class="k">PDOP / HDOP / VDOP</div><div class="v sm" id="vDop">--</div><div class="s" id="vSpeed">--</div></div>
+    <div class="card"><div class="k">UTC</div><div class="v sm" id="vUtc">--</div><div class="s" id="vAge">--</div></div>
+  </div>
+
+  <div class="toolbar">
+    <button data-gnss="on" class="btn">开启 GNSS</button>
+    <button data-gnss="off" class="btn">关闭 GNSS</button>
+    <button data-gnss="multi" class="btn primary">一键开启全星座</button>
+    <button data-gnss="hot" class="btn">热启动</button>
+    <button data-gnss="warm" class="btn">温启动</button>
+    <button data-gnss="cold" class="btn warn">冷启动</button>
+    <span class="sep"></span>
+    <button id="btnRec" class="btn">开始录制 NMEA</button>
+    <span id="restartTimer" class="muted"></span>
+  </div>
+
+  <div class="grid2">
+    <div class="panel"><h3>星空图</h3><canvas id="sky" width="420" height="420"></canvas>
+      <div class="legend" id="legend"></div></div>
+    <div class="panel"><h3>卫星载噪比 C/N0 <small class="muted">(实心=参与定位)</small></h3>
+      <canvas id="snr" width="760" height="330"></canvas></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel"><h3>定位散点对比 <small class="muted" id="trackInfo"></small>
+      <button class="btn xs" id="btnTrackReset" style="float:right">重置收敛/散点</button></h3>
+      <canvas id="scatter" width="420" height="420"></canvas>
+      <div class="legend">
+        <span><i style="background:rgba(63,167,255,.7)"></i>原始散点 (Raw)</span>
+        <span><i style="background:#31c46b"></i>静态滤波散点 (Filtered)</span>
+        <span><i style="background:#ffb020"></i>★ Survey-In 收敛中心 (0,0)</span>
+      </div></div>
+    <div class="panel"><h3>卫星列表</h3>
+      <div class="tablewrap"><table id="satTable"><thead><tr>
+        <th>系统</th><th>PRN</th><th>仰角</th><th>方位</th><th>C/N0</th><th>使用</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== TEST ============================== -->
+<section id="tab-test" class="tabpane">
+  <div class="grid2">
+    <div class="panel">
+      <h3>测试参数</h3>
+      <form id="testForm" class="form">
+        <label>样品编号 / 备注 <input name="label" placeholder="SN 或备注"></label>
+        <label>启动方式
+          <select name="mode">
+            <option value="cold">冷启动 (清除星历/历书)</option>
+            <option value="warm">温启动</option>
+            <option value="hot">热启动</option>
+            <option value="none">不重启 (直接观测)</option>
+          </select></label>
+        <label>定位超时 (s) <input name="ttff_timeout" type="number" min="10" value="180"></label>
+        <label>定位后观测时长 (s) <input name="observe" type="number" min="5" value="60"></label>
+        <h4>判定标准 <small class="muted">(填 0 表示不判定)</small></h4>
+        <label>TTFF ≤ (s) <input name="max_ttff" type="number" step="any" value="60"></label>
+        <label>平均使用卫星数 ≥ <input name="min_sats" type="number" step="any" value="6"></label>
+        <label>Top4 平均 C/N0 ≥ (dB-Hz) <input name="min_snr" type="number" step="any" value="35"></label>
+        <label>CEP50 ≤ (m) <input name="max_cep50" type="number" step="any" value="5"></label>
+        <label>定位保持率 ≥ (%) <input name="min_fix_rate" type="number" step="any" value="95"></label>
+        <div class="toolbar">
+          <button type="submit" class="btn primary" id="btnTestStart">▶ 开始测试</button>
+          <button type="button" class="btn warn" id="btnTestStop" disabled>■ 停止</button>
+        </div>
+      </form>
+    </div>
+    <div class="panel">
+      <h3>测试进度</h3>
+      <div id="testState" class="teststate idle">空闲</div>
+      <div class="progress"><div id="testBar"></div></div>
+      <div id="testLive" class="muted"></div>
+      <div id="testResult"></div>
+      <pre id="testLog" class="log"></pre>
+    </div>
+  </div>
+  <div class="panel">
+    <h3>历史结果
+      <span style="float:right">
+        <a class="btn xs" href="/api/results.csv">导出 CSV</a>
+        <button class="btn xs warn" id="btnClearResults">清空</button>
+      </span></h3>
+    <div class="tablewrap tall"><table id="resTable"><thead><tr>
+      <th>时间</th><th>编号</th><th>方式</th><th>结果</th><th>TTFF(s)</th><th>卫星(均)</th><th>可见(最大)</th>
+      <th>Top4 C/N0</th><th>最大C/N0</th><th>HDOP</th><th>CEP50(m)</th><th>CEP95(m)</th><th>保持率</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+</section>
+
+<!-- ============================ CONSOLE ============================ -->
+<section id="tab-console" class="tabpane">
+  <div class="grid2">
+    <div class="panel">
+      <h3>NMEA 原始数据
+        <span style="float:right">
+          <input id="nmeaFilter" placeholder="过滤, 如 GSV" size="10">
+          <button class="btn xs" id="btnNmeaPause">暂停</button>
+          <button class="btn xs" id="btnNmeaClear">清屏</button>
+        </span></h3>
+      <pre id="nmea" class="log tall"></pre>
+    </div>
+    <div class="panel">
+      <h3>AT 命令终端 <small class="muted" id="atPortLbl"></small></h3>
+      <div class="quick">
+        <button class="btn xs" data-at="ATI">ATI</button>
+        <button class="btn xs" data-at="AT+QGPS?">QGPS?</button>
+        <button class="btn xs" data-at="AT+QGPSLOC=2">QGPSLOC=2</button>
+        <button class="btn xs" data-at='AT+QGPSCFG="gnssconfig"'>gnssconfig?</button>
+        <button class="btn xs" data-at="AT+QGPSCFG=?">QGPSCFG=?</button>
+        <button class="btn xs" data-at="AT+QGPSXTRA?">XTRA?</button>
+        <button class="btn xs" data-at="AT+CSQ">CSQ</button>
+        <button class="btn xs" data-at="AT+QGMR">版本</button>
+      </div>
+      <pre id="atLog" class="log tall"></pre>
+      <form id="atForm" class="atform"><input id="atInput" placeholder="输入 AT 命令, 回车发送 (↑↓ 历史)" autocomplete="off"><button class="btn primary">发送</button></form>
+    </div>
+  </div>
+</section>
+
+<!-- ============================= CONFIG ============================= -->
+<section id="tab-config" class="tabpane">
+  <div class="grid2">
+    <div class="panel">
+      <h3>串口设置</h3>
+      <form id="portForm" class="form">
+        <label>NMEA 端口 <select name="nmea_port"></select></label>
+        <label>AT 端口 <select name="at_port"></select></label>
+        <label>波特率 <input name="baud" type="number" value="115200"></label>
+        <label class="chk"><input type="checkbox" name="auto_on"> 服务启动时自动开启 GNSS</label>
+        <div class="toolbar"><button class="btn primary">保存</button></div>
+      </form>
+      <p class="muted">提示: /dev/ttyUSB2 被 ModemManager 独占, 默认使用 /dev/ttyUSB3 发送 AT 命令。</p>
+    </div>
+    <div class="panel">
+      <h3>模块 GNSS 配置 (AT+QGPSCFG) <button class="btn xs" id="btnCfgReload" style="float:right">读取</button></h3>
+      <form id="cfgForm" class="form cfg"></form>
+      <div class="toolbar">
+        <button class="btn" id="btnAllNmea">一键启用全部星座 NMEA 输出</button>
+      </div>
+      <p class="muted">gnssconfig 等部分配置需要关闭 GNSS 或重启模块后生效, 具体取值参见 Quectel GNSS AT 命令手册。</p>
+      <pre id="cfgLog" class="log"></pre>
+    </div>
+  </div>
+  <div class="panel">
+    <h3>NMEA 录制文件</h3>
+    <div class="tablewrap"><table id="logTable"><thead><tr><th>文件</th><th>大小</th><th>时间</th><th></th></tr></thead><tbody></tbody></table></div>
+  </div>
+</section>
+</main>
+<div id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
